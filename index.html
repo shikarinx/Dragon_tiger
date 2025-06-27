@@ -4,10 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dragon vs Tiger - MONETRA</title>
-    
-    <!-- THIS IS THE MISSING LINE -->
     <link rel="stylesheet" href="dragon-tiger-style.css">
-    
     <link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -38,16 +35,12 @@
             </div>
 
             <div class="middle-zone">
-                <div class="card-area" id="dragon-card-area">
-                    <div class="card-placeholder"></div>
-                </div>
+                <div class="card-area" id="dragon-card-area"><div class="card-placeholder"></div></div>
                 <div class="vs-emblem">
                     <img src="vs-emblem.png">
                     <div class="timer" id="timer">...</div>
                 </div>
-                <div class="card-area" id="tiger-card-area">
-                    <div class="card-placeholder"></div>
-                </div>
+                <div class="card-area" id="tiger-card-area"><div class="card-placeholder"></div></div>
             </div>
 
             <div class="betting-zone tiger-zone" data-bet="tiger">
@@ -67,7 +60,7 @@
 
         <div class="bottom-bar">
             <div class="chip-selection">
-                <button class="chip-btn" data-value="20"><img src="chip-20.png"></button>
+                <button class="chip-btn active" data-value="20"><img src="chip-20.png"></button>
                 <button class="chip-btn" data-value="30"><img src="chip-30.png"></button>
                 <button class="chip-btn" data-value="50"><img src="chip-50.png"></button>
                 <button class="chip-btn" data-value="100"><img src="chip-100.png"></button>
@@ -76,7 +69,7 @@
                 <button class="chip-btn" data-value="1000"><img src="chip-1000.png"></button>
             </div>
             <div class="action-buttons">
-                <button class="action-btn" id="confirm-btn">Confirm</button>
+                <button class="action-btn" id="confirm-btn" disabled>Confirm Bet</button>
                 <button class="action-btn" id="repeat-btn">Repeat</button>
             </div>
         </div>
@@ -91,7 +84,217 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
     <script src="firebase-config.js"></script>
     <script>
-        // --- The script remains exactly the same as before ---
+        // --- Firebase & User Setup ---
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('uid');
+        let userDocRef;
+        let gameRoomRef = db.collection('game_rooms').doc('dragon_tiger_1');
+
+        if (!userId) {
+            document.body.innerHTML = '<h1>Error: Not Logged In. Access from main app.</h1>';
+        } else {
+            userDocRef = db.collection('users').doc(userId);
+        }
+        
+        // --- Game State & Elements ---
+        let selectedChipValue = 20;
+        let currentBets = { dragon: 0, tiger: 0, tie: 0 };
+        let lastRoundBets = {};
+        let bettingEnabled = false;
+
+        const balanceEl = document.getElementById('user-balance');
+        const timerEl = document.getElementById('timer');
+        const historyTrackEl = document.getElementById('history-track');
+        const dragonTotalBetEl = document.getElementById('dragon-total-bet');
+        const tigerTotalBetEl = document.getElementById('tiger-total-bet');
+        const tieTotalBetEl = document.getElementById('tie-total-bet');
+        const resultOverlay = document.getElementById('result-overlay');
+        const resultText = document.getElementById('result-text');
+        const confirmBtn = document.getElementById('confirm-btn');
+
+        // --- Event Listeners ---
+        document.querySelectorAll('.chip-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.chip-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                selectedChipValue = parseInt(btn.dataset.value);
+            });
+        });
+
+        document.querySelectorAll('.betting-zone').forEach(zone => {
+            zone.addEventListener('click', () => {
+                if (bettingEnabled) {
+                    const betType = zone.dataset.bet;
+                    placeBet(betType, selectedChipValue);
+                } else {
+                    console.log("Betting is currently closed.");
+                }
+            });
+        });
+
+        confirmBtn.addEventListener('click', confirmBets);
+        document.getElementById('repeat-btn').addEventListener('click', repeatLastBets);
+        document.getElementById('home-btn').addEventListener('click', () => {
+            window.location.href = 'https://shikarinx.github.io/index.html'; 
+        });
+
+        // --- Real-time Listeners ---
+        if (userDocRef) {
+            userDocRef.onSnapshot(doc => {
+                if (doc.exists) {
+                    const userData = doc.data();
+                    balanceEl.textContent = `₹${userData.walletBalance || 0}`;
+                    document.getElementById('user-name').textContent = userData.name || 'Player';
+                }
+            });
+        }
+
+        gameRoomRef.onSnapshot(doc => {
+            if (doc.exists) {
+                const roomData = doc.data();
+                timerEl.textContent = roomData.timer;
+                dragonTotalBetEl.textContent = roomData.totalDragonBet || 0;
+                tigerTotalBetEl.textContent = roomData.totalTigerBet || 0;
+                tieTotalBetEl.textContent = roomData.totalTieBet || 0;
+                
+                if (roomData.history) {
+                    updateHistoryTrack(roomData.history);
+                }
+
+                if (roomData.state === 'betting') {
+                    bettingEnabled = true;
+                    confirmBtn.disabled = false;
+                } else {
+                    bettingEnabled = false;
+                    confirmBtn.disabled = true;
+                }
+
+                if (roomData.state === 'dealing' && roomData.dragonCard && roomData.tigerCard) {
+                    startDealing(roomData.dragonCard, roomData.tigerCard);
+                }
+                
+                if (roomData.state === 'finished' && roomData.winner) {
+                    showResult(roomData.winner);
+                }
+            }
+        });
+
+        // --- Game Functions ---
+        async function placeBet(type, amount) {
+            const currentBalance = parseInt(balanceEl.textContent.replace('₹', ''));
+            const totalPendingBets = Object.values(currentBets).reduce((a, b) => a + b, 0);
+
+            if (amount > currentBalance - totalPendingBets) {
+                alert('Insufficient balance!');
+                return;
+            }
+
+            currentBets[type] += amount;
+            animateChipDrop(type, amount);
+        }
+
+        async function confirmBets() {
+            const totalBet = Object.values(currentBets).reduce((a, b) => a + b, 0);
+            if (totalBet === 0) return;
+
+            try {
+                await db.runTransaction(async (transaction) => {
+                    const userSnap = await transaction.get(userDocRef);
+                    if (!userSnap.exists) { throw "User not found!"; }
+
+                    const currentBalance = userSnap.data().walletBalance;
+                    if (currentBalance < totalBet) { throw "Insufficient balance!"; }
+
+                    transaction.update(userDocRef, { walletBalance: firebase.firestore.FieldValue.increment(-totalBet) });
+                    transaction.update(gameRoomRef, {
+                        totalDragonBet: firebase.firestore.FieldValue.increment(currentBets.dragon),
+                        totalTigerBet: firebase.firestore.FieldValue.increment(currentBets.tiger),
+                        totalTieBet: firebase.firestore.FieldValue.increment(currentBets.tie),
+                    });
+                });
+
+                await db.collection('dt_bets').add({
+                    userId: userId,
+                    roundId: (await gameRoomRef.get()).data().roundId,
+                    bets: currentBets,
+                    status: 'confirmed',
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                });
+
+                lastRoundBets = { ...currentBets };
+                currentBets = { dragon: 0, tiger: 0, tie: 0 };
+                alert('Bets Confirmed!');
+            } catch (error) {
+                console.error("Transaction failed: ", error);
+                alert("Could not place bet: " + error);
+                // Reset local state if transaction fails
+                currentBets = { dragon: 0, tiger: 0, tie: 0 };
+            }
+        }
+
+        function repeatLastBets() {
+            if (bettingEnabled && Object.keys(lastRoundBets).length > 0) {
+                currentBets = { ...lastRoundBets };
+                for (const type in currentBets) {
+                    if (currentBets[type] > 0) {
+                        // Simplified animation, can be improved
+                        animateChipDrop(type, currentBets[type]);
+                    }
+                }
+                confirmBets(); // Automatically confirm repeated bets
+            }
+        }
+
+        function updateHistoryTrack(history) {
+            historyTrackEl.innerHTML = '';
+            history.slice(-15).forEach(result => {
+                const dot = document.createElement('div');
+                dot.classList.add('history-dot', result.toLowerCase());
+                dot.textContent = result.charAt(0);
+                historyTrackEl.appendChild(dot);
+            });
+        }
+        
+        function animateChipDrop(type, amount) {
+            const chipContainer = document.getElementById(`${type}-chips`);
+            const chip = document.createElement('img');
+            chip.src = `chip-${amount}.png`; // Assumes chips are named like this
+            if(!chip.src) chip.src = `chip-20.png`; // Fallback
+            chip.classList.add('bet-chip-animation');
+            chip.style.left = `${20 + Math.random() * 60}%`;
+            chip.style.top = `${20 + Math.random() * 60}%`;
+            chipContainer.appendChild(chip);
+            setTimeout(() => chip.remove(), 1000);
+        }
+
+        function startDealing(dragonCard, tigerCard) {
+            const dragonCardArea = document.getElementById('dragon-card-area');
+            const tigerCardArea = document.getElementById('tiger-card-area');
+            
+            dragonCardArea.innerHTML = `<img src="card-back-dragon.png" class="card dealing">`;
+            tigerCardArea.innerHTML = `<img src="card-back-tiger.png" class="card dealing">`;
+            
+            setTimeout(() => {
+                dragonCardArea.innerHTML = `<img src="card-${dragonCard}.png" class="card revealed">`;
+            }, 1000);
+             setTimeout(() => {
+                tigerCardArea.innerHTML = `<img src="card-${tigerCard}.png" class="card revealed">`;
+            }, 2000);
+        }
+
+        function showResult(winner) {
+            resultText.textContent = `${winner.toUpperCase()} WINS!`;
+            resultText.className = `result-text ${winner.toLowerCase()}`;
+            resultOverlay.style.display = 'flex';
+            setTimeout(() => {
+                resultOverlay.style.display = 'none';
+            }, 2500);
+        }
+
     </script>
 </body>
 </html>
