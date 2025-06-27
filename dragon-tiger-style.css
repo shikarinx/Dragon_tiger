@@ -1,0 +1,200 @@
+/* General Setup */
+body {
+    font-family: 'Teko', sans-serif;
+    background: url('dragon-vs-tiger-bg.png') no-repeat center center/cover;
+    color: white;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.game-table {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Top Bar */
+.top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 20px;
+    background: rgba(0,0,0,0.3);
+    backdrop-filter: blur(5px);
+}
+.user-info { display: flex; align-items: center; gap: 10px; }
+.avatar { width: 40px; height: 40px; border-radius: 50%; border: 2px solid gold; }
+.user-details { display: flex; flex-direction: column; }
+.balance { font-weight: bold; font-size: 1.2rem; }
+.history-track {
+    display: flex;
+    gap: 5px;
+    background: rgba(0,0,0,0.4);
+    padding: 5px 10px;
+    border-radius: 20px;
+}
+.history-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    color: white;
+}
+.history-dot.dragon { background-color: #3b82f6; }
+.history-dot.tiger { background-color: #f97316; }
+.history-dot.tie { background-color: #10b981; }
+.menu-buttons { display: flex; gap: 10px; }
+.icon-btn {
+    background: rgba(255,255,255,0.2);
+    border: none;
+    color: white;
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    font-size: 1.5rem;
+    cursor: pointer;
+}
+
+/* Main Area */
+.main-area {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    grid-template-rows: 1fr auto;
+    gap: 20px;
+    padding: 20px;
+    align-items: center;
+}
+.betting-zone {
+    position: relative;
+    background: rgba(0,0,0,0.4);
+    border-radius: 20px;
+    border: 3px solid transparent;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.betting-zone:hover { border-color: gold; }
+.dragon-zone { border-color: #3b82f6; }
+.tiger-zone { border-color: #f97316; }
+.tie-zone {
+    grid-column: 2 / 3;
+    grid-row: 2 / 3;
+    border-color: #10b981;
+    padding: 10px;
+}
+.emblem { width: 80%; max-height: 120px; object-fit: contain; margin-bottom: 10px; }
+.total-bet { font-size: 1.5rem; font-weight: bold; }
+.payout-ratio { font-size: 1.2rem; color: rgba(255,255,255,0.7); }
+.chip-container {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+}
+.bet-chip-animation {
+    position: absolute;
+    width: 40px;
+    animation: drop-chip 0.5s ease-out forwards;
+}
+@keyframes drop-chip {
+    from { transform: translateY(-100px) scale(1.5); opacity: 0; }
+    to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.middle-zone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+}
+.card-area {
+    width: 100px;
+    height: 140px;
+}
+.card-placeholder {
+    width: 100%; height: 100%;
+    border: 2px dashed rgba(255,255,255,0.3);
+    border-radius: 10px;
+}
+.card {
+    width: 100%;
+    height: 100%;
+    border-radius: 10px;
+}
+.card.dealing { animation: deal-card 0.5s ease-out; }
+.card.revealed { animation: reveal-card 0.5s forwards; }
+@keyframes deal-card { from { transform: translateY(-200px) scale(0); } to { transform: translateY(0) scale(1); } }
+@keyframes reveal-card { 0% { transform: rotateY(0deg); } 50% { transform: rotateY(90deg); } 100% { transform: rotateY(0deg); } }
+
+.vs-emblem { text-align: center; }
+.vs-emblem img { width: 80px; }
+.timer {
+    font-size: 2.5rem;
+    font-weight: bold;
+    color: gold;
+    text-shadow: 0 0 10px gold;
+}
+
+/* Bottom Bar */
+.bottom-bar {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 10px;
+    background: rgba(0,0,0,0.3);
+    backdrop-filter: blur(5px);
+    gap: 30px;
+}
+.chip-selection { display: flex; gap: 10px; }
+.chip-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+    padding: 0;
+}
+.chip-btn img { width: 50px; }
+.chip-btn:hover, .chip-btn.active { transform: scale(1.15) translateY(-5px); }
+.action-buttons { display: flex; gap: 15px; }
+.action-btn {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    border: none;
+    color: white;
+    font-size: 1.2rem;
+    font-family: 'Teko', sans-serif;
+    padding: 10px 30px;
+    border-radius: 30px;
+    cursor: pointer;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+}
+#repeat-btn { background: linear-gradient(135deg, #64748b, #475569); }
+
+/* Result Overlay */
+.result-overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.5);
+    z-index: 100;
+}
+.result-text {
+    font-size: 5rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    animation: zoom-in-out 2.5s forwards;
+}
+@keyframes zoom-in-out {
+    0% { transform: scale(0); opacity: 0; }
+    20% { transform: scale(1.2); opacity: 1; }
+    80% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(1.5); opacity: 0; }
+}
+.result-text.dragon { color: #3b82f6; text-shadow: 0 0 20px #3b82f6; }
+.result-text.tiger { color: #f97316; text-shadow: 0 0 20px #f97316; }
+.result-text.tie { color: #10b981; text-shadow: 0 0 20px #10b981; }

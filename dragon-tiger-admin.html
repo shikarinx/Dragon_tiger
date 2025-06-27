@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DT Admin Panel</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #2c3e50; color: white; }
+        .panel { background: #34495e; padding: 20px; border-radius: 8px; max-width: 600px; margin: auto; }
+        h1, h2 { text-align: center; }
+        .live-stats { display: flex; justify-content: space-around; margin: 20px 0; font-size: 1.5rem; }
+        .controls, .manual-override { display: flex; justify-content: center; gap: 15px; margin-top: 20px; }
+        button { padding: 10px 20px; font-size: 1rem; cursor: pointer; border: none; border-radius: 5px; }
+        #start-btn { background: #2ecc71; color: white; }
+        .force-btn.dragon { background: #3498db; color: white; }
+        .force-btn.tiger { background: #e67e22; color: white; }
+        .force-btn.tie { background: #1abc9c; color: white; }
+        #log { margin-top: 20px; background: #2c3e50; padding: 10px; height: 200px; overflow-y: scroll; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="panel">
+        <h1>Dragon vs Tiger - Admin Panel</h1>
+        <div class="live-stats">
+            <div>Dragon: <span id="dragon-total">0</span></div>
+            <div>Tiger: <span id="tiger-total">0</span></div>
+            <div>Tie: <span id="tie-total">0</span></div>
+        </div>
+        <div class="controls">
+            <button id="start-btn">Start New Round (15s Timer)</button>
+        </div>
+        <h2>Manual Override</h2>
+        <div class="manual-override">
+            <button class="force-btn dragon" data-winner="dragon">Force Dragon Win</button>
+            <button class="force-btn tiger" data-winner="tiger">Force Tiger Win</button>
+            <button class="force-btn tie" data-winner="tie">Force Tie Win</button>
+        </div>
+        <div id="log"></div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script>
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const gameRoomRef = db.collection('game_rooms').doc('dragon_tiger_1');
+
+        const dragonTotalEl = document.getElementById('dragon-total');
+        const tigerTotalEl = document.getElementById('tiger-total');
+        const tieTotalEl = document.getElementById('tie-total');
+        const logEl = document.getElementById('log');
+
+        // Listen for live bet totals
+        gameRoomRef.onSnapshot(doc => {
+            const data = doc.data();
+            dragonTotalEl.textContent = data.totalDragonBet || 0;
+            tigerTotalEl.textContent = data.totalTigerBet || 0;
+            tieTotalEl.textContent = data.totalTieBet || 0;
+        });
+        
+        function log(message) {
+            logEl.innerHTML += `<p>${new Date().toLocaleTimeString()}: ${message}</p>`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        document.getElementById('start-btn').addEventListener('click', () => {
+            log('Starting new round...');
+            gameRoomRef.update({
+                state: 'betting',
+                timer: 15,
+                winner: null,
+                dragonCard: null,
+                tigerCard: null,
+                manualWinner: null // Clear manual override
+            }).then(() => {
+                startServerTimer(15);
+            });
+        });
+
+        document.querySelectorAll('.force-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const winner = btn.dataset.winner;
+                gameRoomRef.update({ manualWinner: winner });
+                log(`Winner for next round forced to: ${winner.toUpperCase()}`);
+                alert(`Winner forced to ${winner.toUpperCase()}`);
+            });
+        });
+
+        function startServerTimer(seconds) {
+            let timer = seconds;
+            const interval = setInterval(() => {
+                timer--;
+                gameRoomRef.update({ timer: timer });
+                if (timer <= 0) {
+                    clearInterval(interval);
+                    declareWinner();
+                }
+            }, 1000);
+        }
+
+        async function declareWinner() {
+            log('Betting finished. Declaring winner...');
+            await gameRoomRef.update({ state: 'dealing' });
+
+            const gameDoc = await gameRoomRef.get();
+            const roomData = gameDoc.data();
+            
+            const cardValues = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+            const dragonCard = cardValues[Math.floor(Math.random() * cardValues.length)];
+            const tigerCard = cardValues[Math.floor(Math.random() * cardValues.length)];
+            const dragonValue = cardValues.indexOf(dragonCard);
+            const tigerValue = cardValues.indexOf(tigerCard);
+
+            let finalWinner;
+
+            if (roomData.manualWinner) {
+                finalWinner = roomData.manualWinner;
+                log(`Manual override detected. Winner is ${finalWinner.toUpperCase()}`);
+            } else {
+                // RNG Logic
+                const totalDragon = roomData.totalDragonBet || 0;
+                const totalTiger = roomData.totalTigerBet || 0;
+                const randomChance = Math.random(); // 0 to 1
+
+                if (totalDragon < totalTiger) {
+                    finalWinner = randomChance < 0.90 ? 'dragon' : 'tiger'; // 90% chance for lower bet to win
+                } else {
+                    finalWinner = randomChance < 0.90 ? 'tiger' : 'dragon'; // 90% chance for lower bet to win
+                }
+                log(`RNG determined winner: ${finalWinner.toUpperCase()}`);
+            }
+
+            if (dragonValue === tigerValue) finalWinner = 'tie';
+
+            await gameRoomRef.update({ dragonCard: dragonCard, tigerCard: tigerCard });
+            
+            // Wait for card animation on client side
+            setTimeout(async () => {
+                await gameRoomRef.update({ winner: finalWinner, state: 'finished' });
+                log(`Result sent to clients: ${finalWinner.toUpperCase()}`);
+                
+                await processPayouts(finalWinner);
+                
+                // Reset total bets for next round after a delay
+                setTimeout(() => {
+                    gameRoomRef.update({ totalDragonBet: 0, totalTigerBet: 0, totalTieBet: 0 });
+                }, 2000);
+
+            }, 3000);
+        }
+
+        async function processPayouts(winner) {
+            log(`Processing payouts for winner: ${winner.toUpperCase()}`);
+            const betsSnapshot = await db.collection('dt_bets').where('roundId', '==', 0).get(); // Assuming roundId logic
+            
+            const batch = db.batch();
+            betsSnapshot.forEach(doc => {
+                const betData = doc.data();
+                const userRef = db.collection('users').doc(betData.userId);
+                
+                let winnings = 0;
+                if (betData.bets[winner]) {
+                    const payoutRatio = winner === 'tie' ? 8 : 1;
+                    winnings = betData.bets[winner] * (1 + payoutRatio);
+                }
+                
+                if (winnings > 0) {
+                    batch.update(userRef, { walletBalance: firebase.firestore.FieldValue.increment(winnings) });
+                }
+            });
+            
+            await batch.commit();
+            log('Payouts processed successfully.');
+        }
+
+    </script>
+</body>
+</html>
