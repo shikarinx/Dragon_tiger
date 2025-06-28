@@ -64,13 +64,19 @@
 
         document.getElementById('start-btn').addEventListener('click', () => {
             log('Starting new round...');
-            const newRoundId = `DT-${Date.now()}`;
+            // Create a unique ID for this new round
+            const newRoundId = Date.now().toString(); 
+            
             gameRoomRef.update({
-                state: 'betting', timer: 15, winner: null,
-                dragonCard: null, tigerCard: null, manualWinner: null,
-                roundId: newRoundId
+                state: 'betting',
+                timer: 15,
+                winner: null,
+                dragonCard: null,
+                tigerCard: null,
+                manualWinner: null,
+                roundId: newRoundId // Save the new round ID
             }).then(() => {
-                startServerTimer(15);
+                startServerTimer(15, newRoundId);
             });
         });
 
@@ -83,16 +89,19 @@
             });
         });
 
-        function startServerTimer(seconds) {
+        function startServerTimer(seconds, roundId) {
             let timer = seconds;
             const interval = setInterval(() => {
                 timer--;
                 gameRoomRef.update({ timer: timer });
-                if (timer <= 0) { clearInterval(interval); declareWinner(); }
+                if (timer <= 0) {
+                    clearInterval(interval);
+                    declareWinner(roundId);
+                }
             }, 1000);
         }
 
-        async function declareWinner() {
+        async function declareWinner(roundId) {
             log('Betting finished. Declaring winner...');
             await gameRoomRef.update({ state: 'dealing' });
 
@@ -100,18 +109,13 @@
             const roomData = gameDoc.data();
             
             const cardValues = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-            let dragonCard, tigerCard, dragonValue, tigerValue;
-            
-            // Ensure cards are not the same unless a Tie is forced
-            do {
-                dragonCard = cardValues[Math.floor(Math.random() * cardValues.length)];
-                tigerCard = cardValues[Math.floor(Math.random() * cardValues.length)];
-            } while (dragonCard === tigerCard && roomData.manualWinner !== 'tie');
-
-            dragonValue = cardValues.indexOf(dragonCard);
-            tigerValue = cardValues.indexOf(tigerCard);
+            const dragonCard = cardValues[Math.floor(Math.random() * cardValues.length)];
+            const tigerCard = cardValues[Math.floor(Math.random() * cardValues.length)];
+            const dragonValue = cardValues.indexOf(dragonCard);
+            const tigerValue = cardValues.indexOf(tigerCard);
 
             let finalWinner;
+
             if (roomData.manualWinner) {
                 finalWinner = roomData.manualWinner;
                 log(`Manual override detected. Winner is ${finalWinner.toUpperCase()}`);
@@ -119,10 +123,7 @@
                 const totalDragon = roomData.totalDragonBet || 0;
                 const totalTiger = roomData.totalTigerBet || 0;
                 const randomChance = Math.random();
-
-                if (dragonValue === tigerValue) {
-                    finalWinner = 'tie';
-                } else if (totalDragon <= totalTiger) {
+                if (totalDragon <= totalTiger) {
                     finalWinner = randomChance < 0.90 ? 'dragon' : 'tiger';
                 } else {
                     finalWinner = randomChance < 0.90 ? 'tiger' : 'dragon';
@@ -138,19 +139,24 @@
                 await gameRoomRef.update({ winner: finalWinner, state: 'finished' });
                 log(`Result sent to clients: ${finalWinner.toUpperCase()}`);
                 
-                await processPayouts(finalWinner, roomData.roundId);
+                await processPayouts(finalWinner, roundId);
                 
                 setTimeout(() => {
                     gameRoomRef.update({ totalDragonBet: 0, totalTigerBet: 0, totalTieBet: 0 });
                 }, 2000);
-
             }, 3000);
         }
 
         async function processPayouts(winner, roundId) {
-            log(`Processing payouts for round ${roundId}...`);
+            log(`Processing payouts for winner: ${winner.toUpperCase()} in round ${roundId}`);
+            // --- THIS IS THE CORRECTED QUERY ---
             const betsSnapshot = await db.collection('dt_bets').where('roundId', '==', roundId).get();
             
+            if (betsSnapshot.empty) {
+                log('No bets were placed in this round.');
+                return;
+            }
+
             const batch = db.batch();
             betsSnapshot.forEach(doc => {
                 const betData = doc.data();
@@ -165,7 +171,6 @@
                 if (winnings > 0) {
                     batch.update(userRef, { walletBalance: firebase.firestore.FieldValue.increment(winnings) });
                 }
-                batch.update(doc.ref, { status: 'processed', winner: winner });
             });
             
             await batch.commit();
